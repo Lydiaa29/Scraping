@@ -11,6 +11,7 @@ from bs4 import BeautifulSoup
 import json
 import time
 import os
+import base64
 
 # ─── Configuration ────────────────────────────────────────────────────────────
 
@@ -51,6 +52,18 @@ def get_soup(url: str) -> BeautifulSoup | None:
 
 def abs_url(href: str) -> str:
     return href if href.startswith("http") else BASE_URL + href
+
+
+def enc(data_id: str) -> str:
+    """Version Python de la fonction enc() du site dzexams.com"""
+    try:
+        # 1. Décodage Base64
+        decoded = base64.b64decode(data_id).decode('latin-1')
+        # 2. Soustraire 8 à chaque code de caractère
+        result = "".join(chr(ord(c) - 8) for c in decoded)
+        return result
+    except Exception:
+        return ""
 
 
 # ─── Scraping matières du BAC ─────────────────────────────────────────────────
@@ -131,33 +144,68 @@ def scrape_examens(fil: dict) -> list[dict]:
     examens = []
     seen: set[str] = set()
 
-    for a in soup.find_all("a", href=True):
-        href = str(a["href"])
-        url = abs_url(href)
-        if url in seen or url == fil["url"]:
-            continue
+    # Mappage des classes vers les préfixes d'URL (selon app.04.js)
+    routes = {
+        'btn-item-sujet': '/ar/sujets/',
+        'btn-item-document': '/ar/documents/',
+        'btn-item-annale': '/ar/annales/',
+    }
 
-        is_pdf       = href.endswith(".pdf")
-        parts        = [p for p in href.split("/") if p]
-        is_exam_page = len(parts) >= 5 and parts[:2] == ["ar", "bac"]
+    # On cherche les éléments avec data-id
+    items = soup.find_all(attrs={"data-id": True})
+    print(f"      → {len(items)} items trouvés avec data-id")
 
-        if not (is_pdf or is_exam_page):
-            continue
+    for item in items:
+        data_id = item["data-id"]
+        slug = enc(data_id)
+        if not slug: continue
 
-        seen.add(url)
-        titre = a.get_text(strip=True) or os.path.basename(href)
-
-        # Cherche l'année dans le titre ou l'URL
-        annee = None
-        for w in (titre + " " + href).replace("-", " ").replace("_", " ").split():
-            if w.isdigit() and 1990 < int(w) < 2100:
-                annee = int(w)
+        # Déterminer le préfixe selon la classe CSS
+        prefix = "/ar/annales/" # par défaut
+        classes = item.get("class", [])
+        for cls, pfx in routes.items():
+            if cls in classes:
+                prefix = pfx
                 break
+        
+        url = abs_url(prefix + slug)
+        if url in seen: continue
+        seen.add(url)
 
+        # Extraction du titre
+        titre_el = item.find(class_="sujet-title")
+        titre = titre_el.get_text(strip=True) if titre_el else "Sans titre"
+        
+        # Extraction de l'année (souvent dans meta-item)
+        annee = None
+        meta_items = item.find_all(class_="meta-item")
+        for mi in meta_items:
+            txt = mi.get_text(strip=True)
+            if txt.isdigit() and 1900 < int(txt) < 2100:
+                annee = int(txt)
+                break
+        
+        # Si on n'a pas trouvé l'année, on cherche dans le titre
+        if not annee:
+            for w in titre.replace("-", " ").split():
+                if w.isdigit() and 1900 < int(w) < 2100:
+                    annee = int(w)
+                    break
+
+        # Visiter la page de détail pour trouver le PDF réel
+        print(f"        • [Page] {titre[:40]}...")
+        pdf_url = None
+        detail_soup = get_soup(url)
+        if detail_soup:
+            # Chercher un lien direct vers un PDF
+            pdf_link = detail_soup.find("a", href=lambda h: h and h.endswith(".pdf"))
+            if pdf_link:
+                pdf_url = abs_url(pdf_link["href"])
+        
         examens.append({
             "titre":   titre,
-            "url":     url,
-            "type":    "pdf" if is_pdf else "page",
+            "url_page": url,
+            "url_pdf":  pdf_url,
             "annee":   annee,
             "filiere": fil["filiere"],
             "matiere": fil["matiere"],
