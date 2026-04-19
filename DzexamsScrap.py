@@ -18,7 +18,7 @@ import base64
 BASE_URL    = "https://www.dzexams.com"
 BAC_URL     = "https://www.dzexams.com/ar/bac"
 OUTPUT_FILE = "dzexams_bac.json"
-DELAY       = 1.0   # secondes entre requêtes
+DELAY       = 0.5   # secondes entre requêtes (visiter les pages de détail prend du temps)
 
 HEADERS = {
     "User-Agent": (
@@ -156,19 +156,23 @@ def scrape_examens(fil: dict) -> list[dict]:
     print(f"      → {len(items)} items trouvés avec data-id")
 
     for item in items:
-        data_id = item["data-id"]
+        data_id = item.get("data-id")
+        if not data_id or not isinstance(data_id, str):
+            continue
+            
         slug = enc(data_id)
         if not slug: continue
 
         # Déterminer le préfixe selon la classe CSS
         prefix = "/ar/annales/" # par défaut
-        classes = item.get("class", [])
-        for cls, pfx in routes.items():
-            if cls in classes:
-                prefix = pfx
-                break
+        item_classes = item.get("class")
+        if isinstance(item_classes, list):
+            for cls, pfx in routes.items():
+                if cls in item_classes:
+                    prefix = pfx
+                    break
         
-        url = abs_url(prefix + slug)
+        url = abs_url(prefix + str(slug))
         if url in seen: continue
         seen.add(url)
 
@@ -197,10 +201,14 @@ def scrape_examens(fil: dict) -> list[dict]:
         pdf_url = None
         detail_soup = get_soup(url)
         if detail_soup:
-            # Chercher un lien direct vers un PDF
-            pdf_link = detail_soup.find("a", href=lambda h: h and h.endswith(".pdf"))
-            if pdf_link:
-                pdf_url = abs_url(pdf_link["href"])
+            # Chercher un lien direct vers un PDF (on assure un retour booléen pour le filtre)
+            pdf_link = detail_soup.find("a", href=lambda h: bool(h and str(h).endswith(".pdf")))
+            if pdf_link and isinstance(pdf_link, dict) and "href" in pdf_link:
+                pdf_url = abs_url(str(pdf_link["href"]))
+            elif pdf_link and hasattr(pdf_link, "get"):
+                href = pdf_link.get("href")
+                if href:
+                    pdf_url = abs_url(str(href))
         
         examens.append({
             "titre":   titre,
