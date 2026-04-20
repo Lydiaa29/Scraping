@@ -14,8 +14,8 @@ Un scraper Python professionnel et robuste pour extraire les sujets d'examens et
 
 1. Clonez ce dépôt :
    ```bash
-   git clone https://github.com/votre-username/dzexams-scraper.git
-   cd dzexams-scraper
+   git clone https://github.com/Lydiaa29/Scraping.git
+   cd Scraper
    ```
 
 2. Installez les dépendances :
